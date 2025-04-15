@@ -478,6 +478,52 @@ impl fmt::Display for Entity {
     }
 }
 
+use diff::Diff;
+impl Diff for Entity {
+    type Repr = Option<Entity>;
+
+    fn diff(&self, other: &Self) -> Self::Repr {
+        if self != other {
+            Some(*other)
+        } else {
+            None
+        }
+    }
+
+    fn apply(&mut self, diff: &Self::Repr) {
+        if let Some(diff) = diff {
+            *self = *diff;
+        }
+    }
+
+    fn identity() -> Self {
+        Entity::PLACEHOLDER
+    }
+}
+
+use diff::Diff;
+impl Diff for Entity {
+    type Repr = Option<Entity>;
+
+    fn diff(&self, other: &Self) -> Self::Repr {
+        if self != other {
+            Some(*other)
+        } else {
+            None
+        }
+    }
+
+    fn apply(&mut self, diff: &Self::Repr) {
+        if let Some(diff) = diff {
+            *self = *diff;
+        }
+    }
+
+    fn identity() -> Self {
+        Entity::PLACEHOLDER
+    }
+}
+
 impl SparseSetIndex for Entity {
     #[inline]
     fn sparse_set_index(&self) -> usize {
