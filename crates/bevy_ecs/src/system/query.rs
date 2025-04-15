@@ -516,7 +516,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///   called in ways that ensure the queries have unique mutable access.
     /// * `world` must be the world used to create `state`.
     #[inline]
-    pub(crate) unsafe fn new(
+    pub unsafe fn new(
         world: UnsafeWorldCell<'w>,
         state: &'s QueryState<D, F>,
         last_run: Tick,
