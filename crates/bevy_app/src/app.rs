@@ -1092,6 +1092,16 @@ impl App {
         })
     }
 
+    /// Returns a reference to the [`World`] of a [`SubApp`] with the given label.
+    pub fn w(&self, label: impl AppLabel) -> &World {
+        self.sub_app(label).world()
+    }
+
+    /// Returns a mut reference to the [`World`] of a [`SubApp`] with the given label.
+    pub fn w_mut(&self, label: impl AppLabel) -> &World {
+        self.sub_app(label).world_mut()
+    }
+
     /// Returns a reference to the [`SubApp`] with the given label.
     ///
     /// # Panics
