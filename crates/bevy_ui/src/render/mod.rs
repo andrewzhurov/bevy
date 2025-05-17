@@ -1104,7 +1104,14 @@ pub fn extract_scrollbars(
             continue;
         };
 
-        //
+        // Note: this is center of ui node.
+        //       | -y
+        //       |
+        // -x ---+--- x
+        //       |
+        //       | y
+        // "up" is -y, "down" is +y (!)
+        // "left" is -x, "right" is +x
         let tf = global_transform.affine();
 
         // full size, with padding+scrollbar+border
@@ -1121,17 +1128,15 @@ pub fn extract_scrollbars(
 
         let track_width = SCROLLBAR_TRACK_WIDTH * camera.scale_factor;
         let thumb_width = SCROLLBAR_THUMB_WIDTH * camera.scale_factor;
+        let thumb_offset = (track_width - thumb_width) / 2.0;
         let track_half_width = track_width / 2.0;
         let thumb_half_width = thumb_width / 2.0;
 
-        let scroll = Vec2::from(scroll_position) * camera.scale_factor;
-
         // Extract scrollbar track and thumb for Y scroll
         if node.overflow.y.is_scroll() {
-            // Tn is top left corner
-            let track_tn_x = psb_half_size.x - track_width;
+            let track_tn_x = psb_half_size.x - uinode.border.right - track_width;
             // Note: ui tn origin is top _left_
-            let track_tn_y = uinode.border.top;
+            let track_tn_y = -psb_half_size.y + uinode.border.top;
             let track_tn = Vec3::new(track_tn_x, track_tn_y, 0.0);
             let track_tf = tf * bevy_math::Affine3A::from_translation(track_tn);
 
@@ -1151,7 +1156,7 @@ pub fn extract_scrollbars(
                 extracted_camera_entity,
                 item: ExtractedUiItem::Node {
                     atlas_scaling: None,
-                    transform: track_tf.into(),
+                    transform: track_tf * Mat4::from_translation(track_rect.center().extend(0.)),
                     flip_x: false,
                     flip_y: false,
                     border: BorderRect::ZERO,
@@ -1167,19 +1172,100 @@ pub fn extract_scrollbars(
             let view_size_rel = p_size.y / view_size_y;
 
             let thumb_height = p_size.y * view_size_rel;
-            let thumb_half_height = thumb_height / 2.0;
             let rect = Rect {
-                min: Vec2::new(-thumb_half_width, -thumb_half_height),
-                max: Vec2::new(thumb_half_width, thumb_half_height),
+                min: Vec2::ZERO,
+                max: Vec2::new(thumb_width, thumb_height),
             };
 
             let offset_y = scroll_position.offset_y * camera.scale_factor;
-            let view_center_y = offset_y + p_half_size.y;
-            let view_center_rel = view_center_y / view_size_y;
+            let view_top_rel = offset_y / view_size_y;
 
             let thumb_tn = Vec3::new(
-                track_tn_x,
-                -p_half_size.y + p_half_size.y * view_center_rel,
+                track_tn_x + thumb_offset,
+                track_tn_y + p_size.y * view_top_rel,
+                0.0,
+            );
+            let thumb_tf = tf * bevy_math::Affine3A::from_translation(thumb_tn);
+
+            extracted_uinodes.uinodes.push(ExtractedUiNode {
+                render_entity: commands.spawn(TemporaryRenderEntity).id(),
+                stack_index: uinode.stack_index,
+                color: scrollbar_color.thumb_color.into(),
+                rect,
+                clip: clip.map(|clip| clip.clip),
+                image: AssetId::default(),
+                extracted_camera_entity,
+                item: ExtractedUiItem::Node {
+                    atlas_scaling: None,
+                    transform: thumb_tf * Mat4::from_translation(rect.center().extend(0.)),
+                    flip_x: false,
+                    flip_y: false,
+                    border: BorderRect::ZERO,
+                    border_radius: ResolvedBorderRadius {
+                        top_left: SCROLLBAR_THUMB_ROUNDING,
+                        top_right: SCROLLBAR_THUMB_ROUNDING,
+                        bottom_left: SCROLLBAR_THUMB_ROUNDING,
+                        bottom_right: SCROLLBAR_THUMB_ROUNDING,
+                    },
+                    node_type: NodeType::Rect,
+                },
+                main_entity: entity.into(),
+            });
+        }
+
+        // Extract scrollbar track and thumb for X scroll
+        if node.overflow.x.is_scroll() {
+            // top of track's rect
+            let track_tn_y = psb_half_size.y - uinode.border.bottom - track_width;
+            // left of track's rect
+            let track_tn_x = -psb_half_size.x + uinode.border.left;
+            let track_tn = Vec3::new(track_tn_x, track_tn_y, 0.0);
+            let track_tf = tf * bevy_math::Affine3A::from_translation(track_tn);
+
+            // Based on p_size, as basing on ps_size will have scrollbars overlapping
+            let track_rect = Rect {
+                min: Vec2::ZERO,
+                max: Vec2::new(p_size.x, track_width),
+            };
+
+            extracted_uinodes.uinodes.push(ExtractedUiNode {
+                render_entity: commands.spawn(TemporaryRenderEntity).id(),
+                stack_index: uinode.stack_index,
+                color: scrollbar_color.track_color.into(),
+                rect: track_rect,
+                clip: clip.map(|clip| clip.clip),
+                image: AssetId::default(),
+                extracted_camera_entity,
+                item: ExtractedUiItem::Node {
+                    atlas_scaling: None,
+                    transform: track_tf * Mat4::from_translation(track_rect.center().extend(0.)),
+                    flip_x: false,
+                    flip_y: false,
+                    border: BorderRect::ZERO,
+                    border_radius: ResolvedBorderRadius::ZERO,
+                    node_type: NodeType::Rect,
+                },
+                main_entity: entity.into(),
+            });
+
+            // Note: content_size = measured_size + padding.sum_axes()
+            // Viewable size, scrollbar's thumb is sized and relative to it.
+            let view_size_x = uinode.content_size.x.max(p_size.x);
+            let view_size_rel = p_size.x / view_size_x;
+
+            // "main" axis is parallel to track
+            let thumb_size_main = p_size.x * view_size_rel;
+            let rect = Rect {
+                min: Vec2::ZERO,
+                max: Vec2::new(thumb_size_main, thumb_width),
+            };
+
+            let offset_x = scroll_position.offset_x * camera.scale_factor;
+            let view_left_rel = offset_x / view_size_x;
+
+            let thumb_tn = Vec3::new(
+                track_tn_x + p_size.x * view_left_rel,
+                track_tn_y + thumb_offset,
                 0.0,
             );
             let thumb_tf = tf * bevy_math::Affine3A::from_translation(thumb_tn);
