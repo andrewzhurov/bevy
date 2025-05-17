@@ -179,7 +179,7 @@ with UI components as a child of an entity without UI components, your UI layout
             &ui_children,
             computed_target.scale_factor.recip(),
             Vec2::ZERO,
-            Vec2::ZERO,
+            None,
         );
     }
 
@@ -202,7 +202,7 @@ with UI components as a child of an entity without UI components, your UI layout
         ui_children: &UiChildren,
         inverse_target_scale_factor: f32,
         parent_size: Vec2,
-        parent_scroll_position: Vec2,
+        maybe_parent_scroll_position: Option<Vec2>,
     ) {
         if let Ok((
             mut node,
@@ -223,12 +223,33 @@ with UI components as a child of an entity without UI components, your UI layout
             };
 
             let layout_size = Vec2::new(layout.size.width, layout.size.height);
-
             let layout_location = Vec2::new(layout.location.x, layout.location.y);
 
-            // The position of the center of the node, stored in the node's transform
-            let node_center =
-                layout_location - parent_scroll_position + 0.5 * (layout_size - parent_size);
+            let mut node_center = layout_location + 0.5 * (layout_size - parent_size);
+            // let mut node_center = layout_location + 0.5 * layout_size;
+
+            // Adjust position according to parent scroll position
+            if let Some(parent_scroll_position) = maybe_parent_scroll_position {
+                node_center -= parent_scroll_position;
+            }
+
+            if transform.translation.truncate() != node_center {
+                transform.translation = node_center.extend(0.);
+            }
+
+            // Ensure ScrollPosition is present if any axis is set to Scroll
+            match (
+                style.overflow.is_any_scroll(),
+                maybe_scroll_position.is_some(),
+            ) {
+                (true, false) => {
+                    commands.entity(entity).insert(ScrollPosition::DEFAULT);
+                }
+                (false, true) => {
+                    commands.entity(entity).remove::<ScrollPosition>();
+                }
+                _ => {}
+            };
 
             // only trigger change detection when the new values are different
             if node.size != layout_size
@@ -250,8 +271,14 @@ with UI components as a child of an entity without UI components, your UI layout
                 bottom: rect.bottom,
             };
 
+            // println!("Taffy border: {:?}", layout.border);
+
             node.bypass_change_detection().border = taffy_rect_to_border_rect(layout.border);
             node.bypass_change_detection().padding = taffy_rect_to_border_rect(layout.padding);
+            node.bypass_change_detection().scrollbar_size =
+                Vec2::new(layout.scrollbar_size.width, layout.scrollbar_size.height);
+
+            // println!("Our border: {:?}", node.border);
 
             let viewport_size = root_size.unwrap_or(node.size);
 
@@ -288,41 +315,24 @@ with UI components as a child of an entity without UI components, your UI layout
                 .max(0.);
             }
 
-            if transform.translation.truncate() != node_center {
-                transform.translation = node_center.extend(0.);
-            }
+            let maybe_physical_scroll_position =
+                maybe_scroll_position
+                    .map(Vec2::from)
+                    .map(|scroll_position| {
+                        let max_possible_offset = (content_size - layout_size).max(Vec2::ZERO);
+                        let clamped_scroll_position = scroll_position.clamp(
+                            Vec2::ZERO,
+                            max_possible_offset * inverse_target_scale_factor,
+                        );
 
-            let scroll_position: Vec2 = maybe_scroll_position
-                .map(|scroll_pos| {
-                    Vec2::new(
-                        if style.overflow.x == OverflowAxis::Scroll {
-                            scroll_pos.offset_x
-                        } else {
-                            0.0
-                        },
-                        if style.overflow.y == OverflowAxis::Scroll {
-                            scroll_pos.offset_y
-                        } else {
-                            0.0
-                        },
-                    )
-                })
-                .unwrap_or_default();
+                        if clamped_scroll_position != scroll_position {
+                            commands
+                                .entity(entity)
+                                .insert(ScrollPosition::from(clamped_scroll_position));
+                        }
 
-            let max_possible_offset = (content_size - layout_size).max(Vec2::ZERO);
-            let clamped_scroll_position = scroll_position.clamp(
-                Vec2::ZERO,
-                max_possible_offset * inverse_target_scale_factor,
-            );
-
-            if clamped_scroll_position != scroll_position {
-                commands
-                    .entity(entity)
-                    .insert(ScrollPosition::from(clamped_scroll_position));
-            }
-
-            let physical_scroll_position =
-                (clamped_scroll_position / inverse_target_scale_factor).round();
+                        (clamped_scroll_position / inverse_target_scale_factor).round()
+                    });
 
             for child_uinode in ui_children.iter_ui_children(entity) {
                 update_uinode_geometry_recursive(
@@ -335,7 +345,7 @@ with UI components as a child of an entity without UI components, your UI layout
                     ui_children,
                     inverse_target_scale_factor,
                     layout_size,
-                    physical_scroll_position,
+                    maybe_physical_scroll_position,
                 );
             }
         }

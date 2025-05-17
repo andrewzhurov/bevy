@@ -1,3 +1,4 @@
+use bevy_math::Vec2;
 use bevy_reflect::{std_traits::ReflectDefault, Reflect};
 
 /// Defines the extents of the border of a rectangle.
@@ -43,6 +44,10 @@ impl BorderRect {
             top: vertical,
             bottom: vertical,
         }
+    }
+
+    pub fn sum_axes(&self) -> Vec2 {
+        Vec2::new(self.left + self.right, self.top + self.bottom)
     }
 }
 

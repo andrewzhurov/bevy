@@ -27,6 +27,12 @@ fn main() {
         .run();
 }
 
+#[derive(Component)]
+struct StatusText;
+
+#[derive(Component)]
+struct EditableText;
+
 fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(Camera2d);
 
@@ -35,6 +41,7 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
     let font = asset_server.load("fonts/FiraMono-Medium.ttf");
 
     commands.spawn((
+        StatusText,
         Text::default(),
         Node {
             position_type: PositionType::Absolute,
@@ -60,6 +67,7 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
     ));
 
     commands.spawn((
+        EditableText,
         Text2d::new(""),
         TextFont {
             font,
@@ -72,7 +80,7 @@ fn setup_scene(mut commands: Commands, asset_server: Res<AssetServer>) {
 fn toggle_ime(
     input: Res<ButtonInput<MouseButton>>,
     mut window: Single<&mut Window>,
-    status_text: Single<Entity, (With<Node>, With<Text>)>,
+    status_text: Single<Entity, With<StatusText>>,
     mut ui_writer: TextUiWriter,
 ) {
     if input.just_pressed(MouseButton::Left) {
@@ -83,28 +91,10 @@ fn toggle_ime(
     }
 }
 
-#[derive(Component)]
-struct Bubble {
-    timer: Timer,
-}
-
-fn bubbling_text(
-    mut commands: Commands,
-    mut bubbles: Query<(Entity, &mut Transform, &mut Bubble)>,
-    time: Res<Time>,
-) {
-    for (entity, mut transform, mut bubble) in bubbles.iter_mut() {
-        if bubble.timer.tick(time.delta()).just_finished() {
-            commands.entity(entity).despawn();
-        }
-        transform.translation.y += time.delta_secs() * 100.0;
-    }
-}
-
 fn listen_ime_events(
     mut events: EventReader<Ime>,
-    status_text: Single<Entity, (With<Node>, With<Text>)>,
-    mut edit_text: Single<&mut Text2d, (Without<Node>, Without<Bubble>)>,
+    status_text: Single<Entity, With<StatusText>>,
+    mut edit_text: Single<&mut Text2d, With<EditableText>>,
     mut ui_writer: TextUiWriter,
 ) {
     for event in events.read() {
@@ -115,9 +105,9 @@ fn listen_ime_events(
             Ime::Preedit { cursor, .. } if cursor.is_none() => {
                 *ui_writer.text(*status_text, 7) = "\n".to_string();
             }
-            Ime::Commit { value, .. } => {
-                edit_text.push_str(value);
-            }
+            // Ime::Commit { value, .. } => {
+            //     edit_text.push_str(value);
+            // }
             Ime::Enabled { .. } => {
                 *ui_writer.text(*status_text, 5) = "true\n".to_string();
             }
@@ -132,7 +122,7 @@ fn listen_ime_events(
 fn listen_keyboard_input_events(
     mut commands: Commands,
     mut events: EventReader<KeyboardInput>,
-    edit_text: Single<(&mut Text2d, &TextFont), (Without<Node>, Without<Bubble>)>,
+    edit_text: Single<(&mut Text2d, &TextFont), With<EditableText>>,
 ) {
     let (mut text, style) = edit_text.into_inner();
     for event in events.read() {
@@ -168,6 +158,24 @@ fn listen_keyboard_input_events(
             }
             _ => continue,
         }
+    }
+}
+
+#[derive(Component)]
+struct Bubble {
+    timer: Timer,
+}
+
+fn bubbling_text(
+    mut commands: Commands,
+    mut bubbles: Query<(Entity, &mut Transform, &mut Bubble)>,
+    time: Res<Time>,
+) {
+    for (entity, mut transform, mut bubble) in bubbles.iter_mut() {
+        if bubble.timer.tick(time.delta()).just_finished() {
+            commands.entity(entity).despawn();
+        }
+        transform.translation.y += time.delta_secs() * 100.0;
     }
 }
 

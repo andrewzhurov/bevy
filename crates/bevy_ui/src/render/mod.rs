@@ -7,10 +7,11 @@ pub mod ui_texture_slice_pipeline;
 #[cfg(feature = "bevy_ui_debug")]
 mod debug_overlay;
 
-use crate::widget::{ImageNode, ViewportNode};
+use crate::widget::{ImageNode, ImageNodeSize, ViewportNode};
 use crate::{
     BackgroundColor, BorderColor, BoxShadowSamples, CalculatedClip, ComputedNode,
-    ComputedNodeTarget, Outline, ResolvedBorderRadius, TextShadow, UiAntiAlias,
+    ComputedNodeTarget, Outline, ResolvedBorderRadius, ScrollPosition, ScrollbarColor, TextShadow,
+    UiAntiAlias, SCROLLBAR_THUMB_ROUNDING, SCROLLBAR_THUMB_WIDTH, SCROLLBAR_TRACK_WIDTH,
 };
 use bevy_app::prelude::*;
 use bevy_asset::{load_internal_asset, weak_handle, AssetEvent, AssetId, Assets, Handle};
@@ -111,6 +112,7 @@ pub enum RenderUiSystems {
     ExtractTextBackgrounds,
     ExtractTextShadows,
     ExtractText,
+    ExtractScrollbars,
     ExtractDebug,
 }
 
@@ -146,6 +148,7 @@ pub fn build_ui_render(app: &mut App) {
                 RenderUiSystems::ExtractTextBackgrounds,
                 RenderUiSystems::ExtractTextShadows,
                 RenderUiSystems::ExtractText,
+                RenderUiSystems::ExtractScrollbars,
                 RenderUiSystems::ExtractDebug,
             )
                 .chain(),
@@ -161,6 +164,7 @@ pub fn build_ui_render(app: &mut App) {
                 extract_text_background_colors.in_set(RenderUiSystems::ExtractTextBackgrounds),
                 extract_text_shadows.in_set(RenderUiSystems::ExtractTextShadows),
                 extract_text_sections.in_set(RenderUiSystems::ExtractText),
+                extract_scrollbars.in_set(RenderUiSystems::ExtractScrollbars),
                 #[cfg(feature = "bevy_ui_debug")]
                 debug_overlay::extract_debug_overlay.in_set(RenderUiSystems::ExtractDebug),
             ),
@@ -404,12 +408,15 @@ pub fn extract_uinode_images(
             Option<&CalculatedClip>,
             &ComputedNodeTarget,
             &ImageNode,
+            &ImageNodeSize,
         )>,
     >,
     camera_map: Extract<UiCameraMap>,
 ) {
     let mut camera_mapper = camera_map.get_mapper();
-    for (entity, uinode, transform, inherited_visibility, clip, camera, image) in &uinode_query {
+    for (entity, uinode, transform, inherited_visibility, clip, camera, image, image_size) in
+        &uinode_query
+    {
         // Skip invisible images
         if !inherited_visibility.get()
             || image.color.is_fully_transparent()
@@ -433,7 +440,7 @@ pub fn extract_uinode_images(
         let mut rect = match (atlas_rect, image.rect) {
             (None, None) => Rect {
                 min: Vec2::ZERO,
-                max: uinode.size,
+                max: image_size.size().as_vec2(),
             },
             (None, Some(image_rect)) => image_rect,
             (Some(atlas_rect), None) => atlas_rect,
@@ -444,8 +451,12 @@ pub fn extract_uinode_images(
             }
         };
 
+        // content_size, which comes from Tuffy, is measured_size + padding,
+        // we need to know paddless size, to scale original dimentions to it
+        let base_content_size = uinode.content_size() - uinode.padding.sum_axes();
+
         let atlas_scaling = if atlas_rect.is_some() || image.rect.is_some() {
-            let atlas_scaling = uinode.size() / rect.size();
+            let atlas_scaling = base_content_size / rect.size();
             rect.min *= atlas_scaling;
             rect.max *= atlas_scaling;
             Some(atlas_scaling)
@@ -453,6 +464,23 @@ pub fn extract_uinode_images(
             None
         };
 
+        let content_inset = uinode.content_inset();
+
+        let tf_content_inset_adjust = bevy_math::Affine3A::from_translation(Vec3::new(
+            (content_inset.left - content_inset.right) / 2.0,
+            (content_inset.top - content_inset.bottom) / 2.0,
+            0.0,
+        ));
+
+        let tf_scale_adjust = bevy_math::Affine3A::from_scale(Vec3::new(
+            base_content_size.x / rect.size().x,
+            base_content_size.y / rect.size().y,
+            1.0,
+        ));
+
+        let tf = transform.compute_matrix() * tf_content_inset_adjust * tf_scale_adjust;
+
+        // apply border on BoxSizing::BorderBox
         extracted_uinodes.uinodes.push(ExtractedUiNode {
             render_entity: commands.spawn(TemporaryRenderEntity).id(),
             stack_index: uinode.stack_index,
@@ -463,10 +491,10 @@ pub fn extract_uinode_images(
             extracted_camera_entity,
             item: ExtractedUiItem::Node {
                 atlas_scaling,
-                transform: transform.compute_matrix(),
+                transform: tf,
                 flip_x: image.flip_x,
                 flip_y: image.flip_y,
-                border: uinode.border,
+                border: BorderRect::ZERO, // border does not hide content // uinode.border,
                 border_radius: uinode.border_radius,
                 node_type: NodeType::Rect,
             },
@@ -809,8 +837,17 @@ pub fn extract_text_sections(
             continue;
         };
 
+        let content_inset = uinode.content_inset();
+
+        let tf_content_inset_adjust = bevy_math::Affine3A::from_translation(Vec3::new(
+            content_inset.left,
+            content_inset.top,
+            0.,
+        ));
+
         let transform = global_transform.affine()
-            * bevy_math::Affine3A::from_translation((-0.5 * uinode.size()).extend(0.));
+            * bevy_math::Affine3A::from_translation((-0.5 * uinode.size()).extend(0.))
+            * tf_content_inset_adjust;
 
         for (
             i,
@@ -906,10 +943,15 @@ pub fn extract_text_shadows(
             continue;
         };
 
-        let transform = global_transform.affine()
-            * Mat4::from_translation(
-                (-0.5 * uinode.size() + shadow.offset / uinode.inverse_scale_factor()).extend(0.),
-            );
+        let content_inset = uinode.content_inset();
+
+        let tn_to_top_left_adjust = -uinode.size() / 2.0;
+        let tn_scaled_shadow_adjust = shadow.offset / uinode.inverse_scale_factor();
+        let tn_content_inset_adjust = Vec2::new(content_inset.left, content_inset.top);
+
+        let tn = tn_to_top_left_adjust + tn_scaled_shadow_adjust + tn_content_inset_adjust;
+
+        let transform = global_transform.affine() * Mat4::from_translation(tn.extend(0.));
 
         for (
             i,
@@ -983,8 +1025,13 @@ pub fn extract_text_background_colors(
             continue;
         };
 
-        let transform = global_transform.affine()
-            * bevy_math::Affine3A::from_translation(-0.5 * uinode.size().extend(0.));
+        let content_inset = uinode.content_inset();
+
+        let tn_to_top_left_adjust = -uinode.size() / 2.0;
+        let tn_content_inset_adjust = Vec2::new(content_inset.left, content_inset.top);
+        let tn = (tn_to_top_left_adjust + tn_content_inset_adjust).extend(0.0);
+
+        let transform = global_transform.affine() * bevy_math::Affine3A::from_translation(tn);
 
         for &(section_entity, rect) in text_layout_info.section_rects.iter() {
             let Ok(text_background_color) = text_background_colors_query.get(section_entity) else {
@@ -1007,13 +1054,239 @@ pub fn extract_text_background_colors(
                     transform: transform * Mat4::from_translation(rect.center().extend(0.)),
                     flip_x: false,
                     flip_y: false,
-                    border: uinode.border(),
+                    border: BorderRect::ZERO,
                     border_radius: uinode.border_radius(),
                     node_type: NodeType::Rect,
                 },
                 main_entity: entity.into(),
             });
         }
+    }
+}
+
+pub fn extract_scrollbars(
+    mut commands: Commands,
+    mut extracted_uinodes: ResMut<ExtractedUiNodes>,
+    uinode_query: Extract<
+        Query<(
+            Entity,
+            &Node,
+            &ComputedNode,
+            &ComputedNodeTarget,
+            Option<&CalculatedClip>,
+            &GlobalTransform,
+            &InheritedVisibility,
+            &ScrollPosition,
+            &ScrollbarColor,
+        )>,
+    >,
+    camera_map: Extract<UiCameraMap>,
+) {
+    let mut camera_mapper = camera_map.get_mapper();
+    for (
+        entity,
+        node,
+        uinode,
+        camera,
+        clip,
+        global_transform,
+        inherited_visibility,
+        scroll_position,
+        scrollbar_color,
+    ) in &uinode_query
+    {
+        // Skip if not visible or if size is set to zero (e.g. when a parent is set to `Display::None`)
+        if !inherited_visibility.get() || uinode.is_empty() {
+            continue;
+        }
+
+        let Some(extracted_camera_entity) = camera_mapper.map(camera) else {
+            continue;
+        };
+
+        //
+        let tf = global_transform.affine();
+
+        // full size, with padding+scrollbar+border
+        let psb_size = uinode.size;
+        // size with padding+scrollbar, without border size
+        let ps_size = psb_size - uinode.border.sum_axes();
+        // size with padding, without scrollbar and border sizes
+        // this is a kind of viewport of our scroll container
+        let p_size = ps_size - uinode.scrollbar_size;
+
+        let psb_half_size = psb_size / 2.0;
+        let ps_half_size = ps_size / 2.0;
+        let p_half_size = p_size / 2.0;
+
+        let track_width = SCROLLBAR_TRACK_WIDTH * camera.scale_factor;
+        let thumb_width = SCROLLBAR_THUMB_WIDTH * camera.scale_factor;
+        let track_half_width = track_width / 2.0;
+        let thumb_half_width = thumb_width / 2.0;
+
+        let scroll = Vec2::from(scroll_position) * camera.scale_factor;
+
+        // Extract scrollbar track and thumb for Y scroll
+        if node.overflow.y.is_scroll() {
+            // Tn is top left corner
+            let track_tn_x = psb_half_size.x - track_width;
+            // Note: ui tn origin is top _left_
+            let track_tn_y = uinode.border.top;
+            let track_tn = Vec3::new(track_tn_x, track_tn_y, 0.0);
+            let track_tf = tf * bevy_math::Affine3A::from_translation(track_tn);
+
+            // Based on p_size, as basing on ps_size will have scrollbars overlapping
+            let track_rect = Rect {
+                min: Vec2::ZERO,
+                max: Vec2::new(track_width, p_size.y),
+            };
+
+            extracted_uinodes.uinodes.push(ExtractedUiNode {
+                render_entity: commands.spawn(TemporaryRenderEntity).id(),
+                stack_index: uinode.stack_index,
+                color: scrollbar_color.track_color.into(),
+                rect: track_rect,
+                clip: clip.map(|clip| clip.clip),
+                image: AssetId::default(),
+                extracted_camera_entity,
+                item: ExtractedUiItem::Node {
+                    atlas_scaling: None,
+                    transform: track_tf.into(),
+                    flip_x: false,
+                    flip_y: false,
+                    border: BorderRect::ZERO,
+                    border_radius: ResolvedBorderRadius::ZERO,
+                    node_type: NodeType::Rect,
+                },
+                main_entity: entity.into(),
+            });
+
+            // Note: content_size = measured_size + padding.sum_axes()
+            // Viewable size, scrollbar's thumb is sized and relative to it.
+            let view_size_y = uinode.content_size.y.max(p_size.y);
+            let view_size_rel = p_size.y / view_size_y;
+
+            let thumb_height = p_size.y * view_size_rel;
+            let thumb_half_height = thumb_height / 2.0;
+            let rect = Rect {
+                min: Vec2::new(-thumb_half_width, -thumb_half_height),
+                max: Vec2::new(thumb_half_width, thumb_half_height),
+            };
+
+            let offset_y = scroll_position.offset_y * camera.scale_factor;
+            let view_center_y = offset_y + p_half_size.y;
+            let view_center_rel = view_center_y / view_size_y;
+
+            let thumb_tn = Vec3::new(
+                track_tn_x,
+                -p_half_size.y + p_half_size.y * view_center_rel,
+                0.0,
+            );
+            let thumb_tf = tf * bevy_math::Affine3A::from_translation(thumb_tn);
+
+            extracted_uinodes.uinodes.push(ExtractedUiNode {
+                render_entity: commands.spawn(TemporaryRenderEntity).id(),
+                stack_index: uinode.stack_index,
+                color: scrollbar_color.thumb_color.into(),
+                rect,
+                clip: clip.map(|clip| clip.clip),
+                image: AssetId::default(),
+                extracted_camera_entity,
+                item: ExtractedUiItem::Node {
+                    atlas_scaling: None,
+                    transform: thumb_tf * Mat4::from_translation(rect.center().extend(0.)),
+                    flip_x: false,
+                    flip_y: false,
+                    border: BorderRect::ZERO,
+                    border_radius: ResolvedBorderRadius {
+                        top_left: SCROLLBAR_THUMB_ROUNDING,
+                        top_right: SCROLLBAR_THUMB_ROUNDING,
+                        bottom_left: SCROLLBAR_THUMB_ROUNDING,
+                        bottom_right: SCROLLBAR_THUMB_ROUNDING,
+                    },
+                    node_type: NodeType::Rect,
+                },
+                main_entity: entity.into(),
+            });
+        }
+
+        // Extract scrollbar track and thumb for X scroll
+        // if node.overflow.x.is_scroll() {
+        //     let track_tn_y = uinode.size.y / 2.0 - track_half_size;
+        //     let track_tn = Vec3::new(0.0, track_tn_y, 0.0);
+        //     let track_tf = tf * bevy_math::Affine3A::from_translation(track_tn);
+        //     let track_rect = Rect {
+        //         min: Vec2::new(-half_size_x, -track_half_size),
+        //         max: Vec2::new(half_size_x, track_half_size),
+        //     };
+
+        //     extracted_uinodes.uinodes.push(ExtractedUiNode {
+        //         render_entity: commands.spawn(TemporaryRenderEntity).id(),
+        //         stack_index: uinode.stack_index,
+        //         color: scrollbar_color.track_color.into(),
+        //         rect: track_rect,
+        //         clip: clip.map(|clip| clip.clip),
+        //         image: AssetId::default(),
+        //         extracted_camera_entity,
+        //         item: ExtractedUiItem::Node {
+        //             atlas_scaling: None,
+        //             transform: track_tf * Mat4::from_translation(track_rect.center().extend(0.)),
+        //             flip_x: false,
+        //             flip_y: false,
+        //             border: BorderRect::ZERO,
+        //             border_radius: ResolvedBorderRadius::ZERO,
+        //             node_type: NodeType::Rect,
+        //         },
+        //         main_entity: entity.into(),
+        //     });
+
+        //     // Viewable size, scrollbar's thumb is sized and relative to it.
+        //     let view_size_x = uinode.content_size.x.max(uinode.size.x); // content size may be smaller than size
+
+        //     let offset_x = scroll_position.offset_x * camera.scale_factor;
+        //     let viewport_center_x = offset_x + half_size_x;
+        //     let viewport_center_x_rel = viewport_center_x / view_size_x;
+        //     let viewport_rel = uinode.size.x / view_size_x;
+
+        //     let thumb_tn = Vec3::new(
+        //         -half_size_x + uinode.size.x * viewport_center_x_rel,
+        //         track_tn_y,
+        //         0.0,
+        //     );
+        //     let thumb_tf = tf * bevy_math::Affine3A::from_translation(thumb_tn);
+
+        //     let thumb_width = (uinode.size.x * viewport_rel).min(uinode.size.x);
+        //     let thumb_half_width = thumb_width / 2.0;
+        //     let rect = Rect {
+        //         min: Vec2::new(-thumb_half_width, -thumb_half_size),
+        //         max: Vec2::new(thumb_half_width, thumb_half_size),
+        //     };
+
+        //     extracted_uinodes.uinodes.push(ExtractedUiNode {
+        //         render_entity: commands.spawn(TemporaryRenderEntity).id(),
+        //         stack_index: uinode.stack_index,
+        //         color: scrollbar_color.thumb_color.into(),
+        //         rect,
+        //         clip: clip.map(|clip| clip.clip),
+        //         image: AssetId::default(),
+        //         extracted_camera_entity,
+        //         item: ExtractedUiItem::Node {
+        //             atlas_scaling: None,
+        //             transform: thumb_tf * Mat4::from_translation(rect.center().extend(0.)),
+        //             flip_x: false,
+        //             flip_y: false,
+        //             border: BorderRect::ZERO,
+        //             border_radius: ResolvedBorderRadius {
+        //                 top_left: SCROLLBAR_THUMB_ROUNDING,
+        //                 top_right: SCROLLBAR_THUMB_ROUNDING,
+        //                 bottom_left: SCROLLBAR_THUMB_ROUNDING,
+        //                 bottom_right: SCROLLBAR_THUMB_ROUNDING,
+        //             },
+        //             node_type: NodeType::Rect,
+        //         },
+        //         main_entity: entity.into(),
+        //     });
+        // }
     }
 }
 

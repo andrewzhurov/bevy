@@ -56,6 +56,10 @@ pub struct ComputedNode {
     ///
     /// Automatically calculated by [`super::layout::ui_layout_system`].
     pub unrounded_size: Vec2,
+    /// The size of scrollbare areas.
+    ///
+    /// Automatically calculated by [`super::layout::ui_layout_system`].
+    pub scrollbar_size: Vec2,
     /// Resolved border values in physical pixels.
     /// Border updates bypass change detection.
     ///
@@ -240,6 +244,7 @@ impl ComputedNode {
         outline_width: 0.,
         outline_offset: 0.,
         unrounded_size: Vec2::ZERO,
+        scrollbar_size: Vec2::ZERO,
         border_radius: ResolvedBorderRadius::ZERO,
         border: BorderRect::ZERO,
         padding: BorderRect::ZERO,
@@ -253,12 +258,38 @@ impl Default for ComputedNode {
     }
 }
 
+#[derive(Component, Debug, Clone, Reflect)]
+#[reflect(Component, Default, Clone)]
+pub struct ScrollbarColor {
+    pub thumb_color: Color,
+    pub track_color: Color,
+}
+
+impl Default for ScrollbarColor {
+    fn default() -> Self {
+        Self {
+            thumb_color: Color::BLACK,
+            track_color: Color::WHITE,
+        }
+    }
+}
+
+/// Scrollbar's track size, of axis perpendicular to main axis of scrollbar,
+/// i.e., will be width for scrollbar y, height for scrollbar x.
+// Named SCROLLBAR_TRACK_WIDTH and not SCROLLBAL_WIDTH,
+// as scrollbar_width has different meaning in CSS
+// https://developer.mozilla.org/en-US/docs/Web/CSS/scrollbar-width
+pub const SCROLLBAR_TRACK_WIDTH: f32 = 50.0;
+pub const SCROLLBAR_THUMB_WIDTH: f32 = SCROLLBAR_TRACK_WIDTH - 4.0;
+pub const SCROLLBAR_THUMB_ROUNDING: f32 = 10.0;
+
 /// The scroll position of the node.
 ///
 /// Updating the values of `ScrollPosition` will reposition the children of the node by the offset amount.
 /// `ScrollPosition` may be updated by the layout system when a layout change makes a previously valid `ScrollPosition` invalid.
 /// Changing this does nothing on a `Node` without setting at least one `OverflowAxis` to `OverflowAxis::Scroll`.
 #[derive(Component, Debug, Clone, Reflect)]
+#[require(ScrollbarColor)]
 #[reflect(Component, Default, Clone)]
 pub struct ScrollPosition {
     /// How far across the node is scrolled, in logical pixels. (0 = not scrolled / scrolled to right)
@@ -328,7 +359,6 @@ impl From<Vec2> for ScrollPosition {
     BorderColor,
     BorderRadius,
     FocusPolicy,
-    ScrollPosition,
     Transform,
     Visibility,
     VisibilityClass,
@@ -1096,6 +1126,12 @@ impl Overflow {
         self.x.is_visible() && self.y.is_visible()
     }
 
+    /// Overflow is scrollable on at least 1 axis
+    pub const fn is_any_scroll(&self) -> bool {
+        // y is most commonly used for scroll, so it's first, to short-circuit
+        self.y.is_scroll() || self.x.is_scroll()
+    }
+
     pub const fn scroll() -> Self {
         Self {
             x: OverflowAxis::Scroll,
@@ -1151,6 +1187,11 @@ impl OverflowAxis {
     /// Overflow is visible on this axis
     pub const fn is_visible(&self) -> bool {
         matches!(self, Self::Visible)
+    }
+
+    /// Overflow is scroll on this axis
+    pub const fn is_scroll(&self) -> bool {
+        matches!(self, Self::Scroll)
     }
 }
 

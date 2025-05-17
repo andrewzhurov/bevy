@@ -436,7 +436,15 @@ mod menu {
                         BackgroundColor(NORMAL_BUTTON),
                         MenuButtonAction::Play,
                         children![
-                            (ImageNode::new(right_icon), button_icon_node.clone()),
+                            (
+                                ImageNode::new(right_icon),
+                                button_icon_node.clone(),
+                                Outline {
+                                    width: Val::Px(6.),
+                                    offset: Val::Px(0.),
+                                    color: Color::WHITE,
+                                }
+                            ),
                             (
                                 Text::new("New Game"),
                                 button_text_font.clone(),

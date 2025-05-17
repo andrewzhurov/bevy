@@ -413,6 +413,14 @@ impl<'a> EntityCommands<'a> {
         self.with_related::<ChildOf>(bundle);
         self
     }
+
+    /// Spawns the passed bundles and adds it to this entity as childs.
+    pub fn with_childs<I: IntoIterator<Item = impl Bundle>>(&mut self, childs: I) -> &mut Self {
+        for child in childs.into_iter() {
+            self.with_related::<ChildOf>(child);
+        }
+        self
+    }
 }
 
 /// An `on_insert` component hook that when run, will validate that the parent of a given entity

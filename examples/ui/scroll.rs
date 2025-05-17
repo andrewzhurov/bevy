@@ -67,6 +67,11 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.10, 0.10, 0.10)),
+                            Outline {
+                                width: Val::Px(6.),
+                                offset: Val::Px(0.),
+                                color: Color::WHITE,
+                            },
                         ))
                         .with_children(|parent| {
                             for i in 0..100 {
@@ -137,10 +142,17 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                                         flex_direction: FlexDirection::Column,
                                         align_self: AlignSelf::Stretch,
                                         height: Val::Percent(50.),
+                                        border: UiRect::all(Val::Px(2.)),
                                         overflow: Overflow::scroll_y(), // n.b.
                                         ..default()
                                     },
+                                    BorderColor::from(Srgba::BLUE),
                                     BackgroundColor(Color::srgb(0.10, 0.10, 0.10)),
+                                    Outline {
+                                        width: Val::Px(6.),
+                                        offset: Val::Px(0.),
+                                        color: Color::WHITE,
+                                    },
                                 ))
                                 .with_children(|parent| {
                                     // List items
@@ -205,14 +217,21 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                                         flex_direction: FlexDirection::Column,
                                         align_self: AlignSelf::Stretch,
                                         height: Val::Percent(50.),
+                                        border: UiRect::all(Val::Px(2.)),
                                         overflow: Overflow::scroll(), // n.b.
                                         ..default()
                                     },
+                                    BorderColor::from(Srgba::BLUE),
                                     BackgroundColor(Color::srgb(0.10, 0.10, 0.10)),
+                                    Outline {
+                                        width: Val::Px(6.),
+                                        offset: Val::Px(0.),
+                                        color: Color::WHITE,
+                                    },
                                 ))
                                 .with_children(|parent| {
                                     // Rows in each column
-                                    for oi in 0..10 {
+                                    for oi in 0..20 {
                                         parent
                                             .spawn(Node {
                                                 flex_direction: FlexDirection::Row,

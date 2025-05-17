@@ -149,14 +149,13 @@ impl TextMeasure {
 impl Measure for TextMeasure {
     fn measure(&mut self, measure_args: MeasureArgs, _style: &taffy::Style) -> Vec2 {
         let MeasureArgs {
-            width,
-            height,
-            available_width,
+            available_width, // (without border+padding)
             buffer,
             font_system,
             ..
         } = measure_args;
-        let x = width.unwrap_or_else(|| match available_width {
+
+        let x = match available_width {
             AvailableSpace::Definite(x) => {
                 // It is possible for the "min content width" to be larger than
                 // the "max content width" when soft-wrapping right-aligned text
@@ -166,29 +165,22 @@ impl Measure for TextMeasure {
             }
             AvailableSpace::MinContent => self.info.min.x,
             AvailableSpace::MaxContent => self.info.max.x,
-        });
+        };
 
-        height
-            .map_or_else(
-                || match available_width {
-                    AvailableSpace::Definite(_) => {
-                        if let Some(buffer) = buffer {
-                            self.info.compute_size(
-                                TextBounds::new_horizontal(x),
-                                buffer,
-                                font_system,
-                            )
-                        } else {
-                            error!("text measure failed, buffer is missing");
-                            Vec2::default()
-                        }
-                    }
-                    AvailableSpace::MinContent => Vec2::new(x, self.info.min.y),
-                    AvailableSpace::MaxContent => Vec2::new(x, self.info.max.y),
-                },
-                |y| Vec2::new(x, y),
-            )
-            .ceil()
+        match available_width {
+            AvailableSpace::Definite(_) => {
+                if let Some(buffer) = buffer {
+                    self.info
+                        .compute_size(TextBounds::new_horizontal(x), buffer, font_system)
+                } else {
+                    error!("text measure failed, buffer is missing");
+                    Vec2::default()
+                }
+            }
+            AvailableSpace::MinContent => Vec2::new(x, self.info.min.y),
+            AvailableSpace::MaxContent => Vec2::new(x, self.info.max.y),
+        }
+        .ceil()
     }
 }
 
@@ -313,8 +305,12 @@ fn queue_text(
         // With `NoWrap` set, no constraints are placed on the width of the text.
         TextBounds::UNBOUNDED
     } else {
+        let padding_sums = node.padding.sum_axes();
         // `scale_factor` is already multiplied by `UiScale`
-        TextBounds::new(node.unrounded_size.x, node.unrounded_size.y)
+        TextBounds::new(
+            node.content_size.x - padding_sums.x,
+            node.content_size.y - padding_sums.y,
+        )
     };
 
     let text_layout_info = text_layout_info.into_inner();
