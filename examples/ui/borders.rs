@@ -331,9 +331,6 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                     },
                     children![
                         (
-                            Text::new("text\nlines"),
-                            TextBackgroundColor::from(PURPLE),
-                            TextShadow::default(),
                             Node {
                                 margin: UiRect::all(Val::Px(20.)),
                                 border,
@@ -347,6 +344,11 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                                 offset: Val::Px(0.),
                                 color: Color::WHITE,
                             },
+                            children![(
+                                Text::new("text\nlines"),
+                                TextBackgroundColor::from(PURPLE),
+                                TextShadow::default()
+                            )]
                         ),
                         (Text::new(label), TextFont::from_font_size(9.0))
                     ],
@@ -373,11 +375,6 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                     },
                     children![
                         (
-                            Text::new(
-                                "I am a pretty long text line 1\nI am a pretty long text line 2"
-                            ),
-                            TextBackgroundColor::from(PURPLE),
-                            TextShadow::default(),
                             Node {
                                 margin: UiRect::all(Val::Px(20.)),
                                 box_sizing: BoxSizing::ContentBox,
@@ -395,6 +392,11 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                                 offset: Val::Px(0.),
                                 color: Color::WHITE,
                             },
+                            children![(
+                                Text::new("I am a pretty long text line 1\nI am a pretty long text line 2"),
+                                TextBackgroundColor::from(PURPLE),
+                                TextShadow::default()
+                            )]
                         ),
                         (Text::new(label), TextFont::from_font_size(9.0))
                     ],
@@ -422,7 +424,6 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                     },
                     children![
                         (
-                            ImageNode::new(image.clone()),
                             Node {
                                 margin: UiRect::all(Val::Px(20.)),
                                 border,
@@ -437,6 +438,7 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                                 offset: Val::Px(0.),
                                 color: Color::WHITE,
                             },
+                            children![ImageNode::new(image.clone()),]
                         ),
                         (Text::new(label), TextFont::from_font_size(9.0))
                     ],
@@ -464,7 +466,6 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                     },
                     children![
                         (
-                            ImageNode::new(image.clone()),
                             Node {
                                 margin: UiRect::all(Val::Px(20.)),
                                 box_sizing: BoxSizing::ContentBox,
@@ -480,6 +481,7 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                                 offset: Val::Px(0.),
                                 color: Color::WHITE,
                             },
+                            children![ImageNode::new(image.clone()),]
                         ),
                         (Text::new(label), TextFont::from_font_size(9.0))
                     ],
@@ -509,13 +511,6 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                         },
                         children![
                             (
-                                ImageNode {
-                                    image: image.clone(),
-                                    // flipped: none, y, yx, x; repeat
-                                    flip_x: flip_pos == 3 || flip_pos == 2,
-                                    flip_y: flip_pos == 1 || flip_pos == 2,
-                                    ..default()
-                                },
                                 Node {
                                     margin: UiRect::all(Val::Px(20.)),
                                     box_sizing: BoxSizing::ContentBox,
@@ -531,6 +526,13 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                                     offset: Val::Px(0.),
                                     color: Color::WHITE,
                                 },
+                                children![ImageNode {
+                                    image: image.clone(),
+                                    // flipped: none, y, yx, x; repeat
+                                    flip_x: flip_pos == 3 || flip_pos == 2,
+                                    flip_y: flip_pos == 1 || flip_pos == 2,
+                                    ..default()
+                                },]
                             ),
                             (Text::new(label), TextFont::from_font_size(9.0))
                         ],
@@ -559,7 +561,6 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                     },
                     children![
                         (
-                            ImageNode::new(image.clone()),
                             Node {
                                 margin: UiRect::all(Val::Px(20.)),
                                 width: Val::Px(120.),
@@ -579,6 +580,7 @@ fn setup(asset_server: Res<AssetServer>, mut commands: Commands) {
                                 offset: Val::Px(0.),
                                 color: Color::WHITE,
                             },
+                            children![ImageNode::new(image.clone()),]
                         ),
                         (Text::new(label), TextFont::from_font_size(9.0))
                     ],
