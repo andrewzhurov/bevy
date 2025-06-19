@@ -7,7 +7,7 @@ use crate::{
     change_detection::{MaybeLocation, MutUntyped},
     component::{ComponentId, Mutable},
     entity::Entity,
-    event::{BufferedEvent, EntityEvent, Event, EventId, Events, SendBatchIds},
+    event::{BufferedEvent, EntityEvent, Event, EventId, Events, PlainEvent, SendBatchIds},
     lifecycle::{HookContext, INSERT, REPLACE},
     observer::{Observers, TriggerTargets},
     prelude::{Component, QueryState},
@@ -820,7 +820,7 @@ impl<'w> DeferredWorld<'w> {
     /// This will run any [`Observer`] of the given [`Event`] that isn't scoped to specific targets.
     ///
     /// [`Observer`]: crate::observer::Observer
-    pub fn trigger(&mut self, trigger: impl Event) {
+    pub fn trigger(&mut self, trigger: impl PlainEvent) {
         self.commands().trigger(trigger);
     }
 

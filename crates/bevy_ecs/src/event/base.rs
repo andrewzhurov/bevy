@@ -125,6 +125,13 @@ pub trait Event: Send + Sync + 'static {
     }
 }
 
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not PlainEvent",
+    label = "invalid `PlainEvent`",
+    note = "consider either annotating `{Self}` with `#[derive(Event)]`, or, if so already, either removing #[event(targeted)] and all other targeted attributes (auto-propagate, traversal) or creating a non-targeted variant of your event"
+)]
+pub trait PlainEvent: Event {}
+
 /// An [`Event`] that can be targeted at specific entities.
 ///
 /// Entity events can be triggered on a [`World`] with specific entity targets using a method

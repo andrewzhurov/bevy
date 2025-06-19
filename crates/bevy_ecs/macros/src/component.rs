@@ -13,12 +13,17 @@ use syn::{
     LitStr, Member, Path, Result, Token, Type, Visibility,
 };
 
-pub const EVENT: &str = "entity_event";
+const EVENT: &str = "event";
+const ENTITY_EVENT: &str = "entity_event";
+pub const TARGETED: &str = "targeted";
 pub const AUTO_PROPAGATE: &str = "auto_propagate";
 pub const TRAVERSAL: &str = "traversal";
 
 pub fn derive_event(input: TokenStream) -> TokenStream {
     let mut ast = parse_macro_input!(input as DeriveInput);
+    let mut targeted = false;
+    let mut auto_propagate = false;
+    let mut traversal: Type = parse_quote!(());
     let bevy_ecs_path: Path = crate::bevy_ecs_path();
 
     ast.generics
@@ -26,12 +31,53 @@ pub fn derive_event(input: TokenStream) -> TokenStream {
         .predicates
         .push(parse_quote! { Self: Send + Sync + 'static });
 
+    if let Some(attr) = ast.attrs.iter().find(|attr| attr.path().is_ident(EVENT))
+        && let Err(e) = attr.parse_nested_meta(|meta| match meta.path.get_ident() {
+            Some(ident) if ident == TARGETED => {
+                targeted = true;
+                Ok(())
+            }
+            Some(ident) if ident == AUTO_PROPAGATE => {
+                targeted = true;
+                auto_propagate = true;
+                Ok(())
+            }
+            Some(ident) if ident == TRAVERSAL => {
+                targeted = true;
+                traversal = meta.value()?.parse()?;
+                Ok(())
+            }
+            Some(ident) => Err(meta.error(format!("unsupported attribute: {ident}"))),
+            None => Err(meta.error("expected identifier")),
+        })
+    {
+        return e.to_compile_error().into();
+    }
+
     let struct_name = &ast.ident;
     let (impl_generics, type_generics, where_clause) = &ast.generics.split_for_impl();
 
-    TokenStream::from(quote! {
+    let mut token_stream = TokenStream::from(quote! {
         impl #impl_generics #bevy_ecs_path::event::Event for #struct_name #type_generics #where_clause {}
-    })
+    });
+
+    if targeted {
+        let targeted_token_stream = TokenStream::from(quote! {
+            impl #impl_generics #bevy_ecs_path::event::EntityEvent for #struct_name #type_generics #where_clause {
+                type Traversal = #traversal;
+                const AUTO_PROPAGATE: bool = #auto_propagate;
+            }
+        });
+        token_stream.extend(vec![targeted_token_stream]);
+    } else {
+        let plain_token_stream = TokenStream::from(quote! {
+            impl #impl_generics #bevy_ecs_path::event::PlainEvent for #struct_name #type_generics #where_clause {
+            }
+        });
+        token_stream.extend(vec![plain_token_stream]);
+    }
+
+    token_stream
 }
 
 pub fn derive_entity_event(input: TokenStream) -> TokenStream {
@@ -45,7 +91,11 @@ pub fn derive_entity_event(input: TokenStream) -> TokenStream {
         .predicates
         .push(parse_quote! { Self: Send + Sync + 'static });
 
-    if let Some(attr) = ast.attrs.iter().find(|attr| attr.path().is_ident(EVENT)) {
+    if let Some(attr) = ast
+        .attrs
+        .iter()
+        .find(|attr| attr.path().is_ident(ENTITY_EVENT))
+    {
         if let Err(e) = attr.parse_nested_meta(|meta| match meta.path.get_ident() {
             Some(ident) if ident == AUTO_PROPAGATE => {
                 auto_propagate = true;

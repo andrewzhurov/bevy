@@ -20,7 +20,7 @@ use crate::{
     component::{Component, ComponentId, Mutable},
     entity::{Entities, Entity, EntityClonerBuilder, EntityDoesNotExistError},
     error::{ignore, warn, BevyError, CommandWithEntity, ErrorContext, HandleError},
-    event::{BufferedEvent, EntityEvent, Event},
+    event::{BufferedEvent, EntityEvent, Event, PlainEvent},
     observer::{Observer, TriggerTargets},
     resource::Resource,
     schedule::ScheduleLabel,
@@ -1084,7 +1084,7 @@ impl<'w, 's> Commands<'w, 's> {
     ///
     /// This will run any [`Observer`] of the given [`Event`] that isn't scoped to specific targets.
     #[track_caller]
-    pub fn trigger(&mut self, event: impl Event) {
+    pub fn trigger(&mut self, event: impl PlainEvent) {
         self.queue(command::trigger(event));
     }
 

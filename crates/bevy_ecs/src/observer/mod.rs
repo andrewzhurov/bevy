@@ -780,11 +780,15 @@ impl World {
     /// those that don't will be consumed and will no longer be accessible.
     /// If you need to use the event after triggering it, use [`World::trigger_ref`] instead.
     #[track_caller]
-    pub fn trigger<E: Event>(&mut self, event: E) {
+    pub fn trigger<E: PlainEvent>(&mut self, event: E) {
         self.trigger_with_caller(event, MaybeLocation::caller());
     }
 
-    pub(crate) fn trigger_with_caller<E: Event>(&mut self, mut event: E, caller: MaybeLocation) {
+    pub(crate) fn trigger_with_caller<E: PlainEvent>(
+        &mut self,
+        mut event: E,
+        caller: MaybeLocation,
+    ) {
         let event_id = E::register_component_id(self);
         // SAFETY: We just registered `event_id` with the type of `event`
         unsafe {
@@ -797,13 +801,13 @@ impl World {
     /// Compared to [`World::trigger`], this method is most useful when it's necessary to check
     /// or use the event after it has been modified by observers.
     #[track_caller]
-    pub fn trigger_ref<E: Event>(&mut self, event: &mut E) {
+    pub fn trigger_ref<E: PlainEvent>(&mut self, event: &mut E) {
         let event_id = E::register_component_id(self);
         // SAFETY: We just registered `event_id` with the type of `event`
         unsafe { self.trigger_dynamic_ref_with_caller(event_id, event, MaybeLocation::caller()) };
     }
 
-    unsafe fn trigger_dynamic_ref_with_caller<E: Event>(
+    unsafe fn trigger_dynamic_ref_with_caller<E: PlainEvent>(
         &mut self,
         event_id: ComponentId,
         event_data: &mut E,
@@ -920,35 +924,20 @@ impl World {
         caller: MaybeLocation,
     ) {
         let mut world = DeferredWorld::from(self);
-        let mut entity_targets = targets.entities().peekable();
-        if entity_targets.peek().is_none() {
+        let entity_targets = targets.entities().peekable();
+        for target_entity in entity_targets {
             // SAFETY: `event_data` is accessible as the type represented by `event_id`
             unsafe {
                 world.trigger_observers_with_data::<_, E::Traversal>(
                     event_id,
-                    None,
-                    None,
+                    Some(target_entity),
+                    Some(target_entity),
                     targets.components(),
                     event_data,
-                    false,
+                    E::AUTO_PROPAGATE,
                     caller,
                 );
             };
-        } else {
-            for target_entity in entity_targets {
-                // SAFETY: `event_data` is accessible as the type represented by `event_id`
-                unsafe {
-                    world.trigger_observers_with_data::<_, E::Traversal>(
-                        event_id,
-                        Some(target_entity),
-                        Some(target_entity),
-                        targets.components(),
-                        event_data,
-                        E::AUTO_PROPAGATE,
-                        caller,
-                    );
-                };
-            }
         }
     }
 
@@ -1109,8 +1098,12 @@ mod tests {
     #[component(storage = "SparseSet")]
     struct S;
 
-    #[derive(Event, EntityEvent)]
+    #[derive(Event)]
+    #[event(targeted)]
     struct EventA;
+
+    #[derive(Event)]
+    struct EventB;
 
     #[derive(Event, EntityEvent)]
     struct EventWithData {
@@ -1136,8 +1129,8 @@ mod tests {
         }
     }
 
-    #[derive(Component, Event, EntityEvent)]
-    #[entity_event(traversal = &'static ChildOf, auto_propagate)]
+    #[derive(Component, Event)]
+    #[event(traversal = &'static ChildOf, auto_propagate)]
     struct EventPropagating;
 
     #[test]
@@ -1412,21 +1405,16 @@ mod tests {
         let mut world = World::new();
         world.init_resource::<Order>();
 
-        let system: fn(On<EventA>) = |_| {
-            panic!("Trigger routed to non-targeted entity.");
-        };
-        world.spawn_empty().observe(system);
-        world.add_observer(move |obs: On<EventA>, mut res: ResMut<Order>| {
-            assert_eq!(obs.target(), Entity::PLACEHOLDER);
-            res.observed("event_a");
+        world.add_observer(|_: On<EventB>, mut res: ResMut<Order>| {
+            res.observed("event_b");
         });
 
         // TODO: ideally this flush is not necessary, but right now observe() returns WorldEntityMut
         // and therefore does not automatically flush.
         world.flush();
-        world.trigger(EventA);
+        world.trigger(EventB);
         world.flush();
-        assert_eq!(vec!["event_a"], world.resource::<Order>().0);
+        assert_eq!(vec!["event_b"], world.resource::<Order>().0);
     }
 
     #[test]
@@ -1434,15 +1422,15 @@ mod tests {
         let mut world = World::new();
         world.init_resource::<Order>();
 
-        let system: fn(On<EventA>) = |_| {
-            panic!("Trigger routed to non-targeted entity.");
-        };
+        world
+            .spawn_empty()
+            .observe(|_: On<EventA>| panic!("Trigger routed to non-targeted entity."));
 
-        world.spawn_empty().observe(system);
         let entity = world
             .spawn_empty()
             .observe(|_: On<EventA>, mut res: ResMut<Order>| res.observed("a_1"))
             .id();
+
         world.add_observer(move |obs: On<EventA>, mut res: ResMut<Order>| {
             assert_eq!(obs.target(), entity);
             res.observed("a_2");
@@ -1938,44 +1926,41 @@ mod tests {
 
         let mut world = World::new();
         // This fails because `ResA` is not present in the world
-        world.add_observer(|_: On<EventA>, _: Res<ResA>, mut commands: Commands| {
-            commands.insert_resource(ResB);
+        world.add_observer(|_: On<EventA>, _: Res<ResB>, mut commands: Commands| {
+            commands.insert_resource(ResA);
         });
-        world.trigger(EventA);
+        world.trigger(EventB);
     }
 
     #[test]
     fn observer_apply_deferred_from_param_set() {
         #[derive(Resource)]
-        struct ResA;
+        struct ResB;
 
         let mut world = World::new();
         world.add_observer(
-            |_: On<EventA>, mut params: ParamSet<(Query<Entity>, Commands)>| {
-                params.p1().insert_resource(ResA);
+            |_: On<EventB>, mut params: ParamSet<(Query<Entity>, Commands)>| {
+                params.p1().insert_resource(ResB);
             },
         );
         // TODO: ideally this flush is not necessary, but right now observe() returns WorldEntityMut
         // and therefore does not automatically flush.
         world.flush();
-        world.trigger(EventA);
+        world.trigger(EventB);
         world.flush();
 
-        assert!(world.get_resource::<ResA>().is_some());
+        assert!(world.get_resource::<ResB>().is_some());
     }
 
     #[test]
     #[track_caller]
     fn observer_caller_location_event() {
-        #[derive(Event)]
-        struct EventA;
-
         let caller = MaybeLocation::caller();
         let mut world = World::new();
-        world.add_observer(move |trigger: On<EventA>| {
+        world.add_observer(move |trigger: On<EventB>| {
             assert_eq!(trigger.caller(), caller);
         });
-        world.trigger(EventA);
+        world.trigger(EventB);
     }
 
     #[test]
